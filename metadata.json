@@ -3,6 +3,7 @@
   "description": "A high-performance, modern AI chat interface powered by Gemini 3.0, featuring real-time streaming, image analysis, and Google Search grounding.",
   "requestFramePermissions": [
     "camera",
-    "microphone"
+    "microphone",
+    "geolocation"
   ]
 }

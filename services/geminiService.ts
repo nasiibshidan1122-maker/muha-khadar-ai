@@ -78,33 +78,40 @@ export class GeminiService {
       config.thinkingConfig = { thinkingBudget: budget };
     }
 
-    const result = await ai.models.generateContentStream({
-      model: modelName,
-      contents,
-      config,
-    });
+    try {
+      const result = await ai.models.generateContentStream({
+        model: modelName,
+        contents,
+        config,
+      });
 
-    for await (const chunk of result) {
-      if (signal?.aborted) break;
-      const response = chunk as GenerateContentResponse;
-      
-      const groundingLinks: any[] = [];
-      const metadata = response.candidates?.[0]?.groundingMetadata;
-      if (metadata && metadata.groundingChunks) {
-        metadata.groundingChunks.forEach((c: any) => {
-          if (c.web) {
-            groundingLinks.push({
-              title: c.web.title,
-              uri: c.web.uri
-            });
-          }
-        });
+      for await (const chunk of result) {
+        if (signal?.aborted) break;
+        const response = chunk as GenerateContentResponse;
+        
+        const groundingLinks: any[] = [];
+        const metadata = response.candidates?.[0]?.groundingMetadata;
+        if (metadata && metadata.groundingChunks) {
+          metadata.groundingChunks.forEach((c: any) => {
+            if (c.web) {
+              groundingLinks.push({
+                title: c.web.title,
+                uri: c.web.uri
+              });
+            }
+          });
+        }
+
+        yield {
+          text: response.text || '',
+          groundingLinks: groundingLinks.length > 0 ? groundingLinks : undefined
+        };
       }
-
-      yield {
-        text: response.text || '',
-        groundingLinks: groundingLinks.length > 0 ? groundingLinks : undefined
-      };
+    } catch (e: any) {
+      if (e.message?.includes("403") || e.message?.toLowerCase().includes("permission denied")) {
+        throw new Error("API_PERMISSION_DENIED");
+      }
+      throw e;
     }
   }
 
@@ -161,8 +168,8 @@ export class GeminiService {
         text: textResponse
       };
     } catch (e: any) {
-      if (e.message?.includes("Requested entity was not found")) {
-        throw new Error("API Key configuration required for high-quality image generation.");
+      if (e.message?.includes("403") || e.message?.toLowerCase().includes("permission denied") || e.message?.includes("Requested entity was not found")) {
+        throw new Error("API_PERMISSION_DENIED");
       }
       throw e;
     }
@@ -178,57 +185,57 @@ export class GeminiService {
 
     onStatusUpdate?.("Initializing Veo Neural Engine...");
     
-    let operation = await ai.models.generateVideos({
-      model: 'veo-3.1-fast-generate-preview',
-      prompt: prompt,
-      config: {
-        numberOfVideos: numberOfVideos,
-        resolution: resolution,
-        aspectRatio: '16:9'
-      }
-    });
-
-    onStatusUpdate?.("Dreaming sequence...");
-    
-    while (!operation.done) {
-      await new Promise(resolve => setTimeout(resolve, 10000));
-      const statusMsgs = [
-        "Scripting the visual narrative...",
-        "Simulating fluid dynamics...",
-        "Rendering cinematic lighting...",
-        "Fine-tuning temporal consistency...",
-        "Capturing high-fidelity motion...",
-        "Adding final stylistic touches..."
-      ];
-      onStatusUpdate?.(statusMsgs[Math.floor(Math.random() * statusMsgs.length)]);
-      
-      try {
-        operation = await ai.operations.getVideosOperation({ operation: operation });
-      } catch (e: any) {
-        if (e.message?.includes("Requested entity was not found")) {
-            throw new Error("API Key configuration required for Video Generation. Please re-select key.");
+    try {
+      let operation = await ai.models.generateVideos({
+        model: 'veo-3.1-fast-generate-preview',
+        prompt: prompt,
+        config: {
+          numberOfVideos: numberOfVideos,
+          resolution: resolution,
+          aspectRatio: '16:9'
         }
-        throw e;
-      }
-    }
+      });
 
-    onStatusUpdate?.("Manifesting cinematic output...");
-    const generatedVideos = operation.response?.generatedVideos;
-    if (!generatedVideos || generatedVideos.length === 0) {
-      throw new Error("Video generation failed: No videos returned.");
-    }
-
-    const videoUrls: string[] = [];
-    for (const videoObj of generatedVideos) {
-      const downloadLink = videoObj.video?.uri;
-      if (downloadLink) {
-        const response = await fetch(`${downloadLink}&key=${process.env.API_KEY}`);
-        const blob = await response.blob();
-        videoUrls.push(URL.createObjectURL(blob));
+      onStatusUpdate?.("Dreaming sequence...");
+      
+      while (!operation.done) {
+        await new Promise(resolve => setTimeout(resolve, 10000));
+        const statusMsgs = [
+          "Scripting the visual narrative...",
+          "Simulating fluid dynamics...",
+          "Rendering cinematic lighting...",
+          "Fine-tuning temporal consistency...",
+          "Capturing high-fidelity motion...",
+          "Adding final stylistic touches..."
+        ];
+        onStatusUpdate?.(statusMsgs[Math.floor(Math.random() * statusMsgs.length)]);
+        
+        operation = await ai.operations.getVideosOperation({ operation: operation });
       }
+
+      onStatusUpdate?.("Manifesting cinematic output...");
+      const generatedVideos = operation.response?.generatedVideos;
+      if (!generatedVideos || generatedVideos.length === 0) {
+        throw new Error("Video generation failed: No videos returned.");
+      }
+
+      const videoUrls: string[] = [];
+      for (const videoObj of generatedVideos) {
+        const downloadLink = videoObj.video?.uri;
+        if (downloadLink) {
+          const response = await fetch(`${downloadLink}&key=${process.env.API_KEY}`);
+          const blob = await response.blob();
+          videoUrls.push(URL.createObjectURL(blob));
+        }
+      }
+      
+      return videoUrls;
+    } catch (e: any) {
+      if (e.message?.includes("403") || e.message?.toLowerCase().includes("permission denied") || e.message?.includes("Requested entity was not found")) {
+          throw new Error("API_PERMISSION_DENIED");
+      }
+      throw e;
     }
-    
-    return videoUrls;
   }
 
   async generateSpeech(text: string, voice: string = 'Kore'): Promise<string | undefined> {
@@ -253,8 +260,11 @@ export class GeminiService {
         },
       });
       return response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-    } catch (e) {
+    } catch (e: any) {
       console.error("Speech synthesis failed", e);
+      if (e.message?.includes("403") || e.message?.toLowerCase().includes("permission denied")) {
+        throw new Error("API_PERMISSION_DENIED");
+      }
       return undefined;
     }
   }
